@@ -964,8 +964,7 @@ function ProveedoresDetalle(props) {
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
         {props.suppliers.map(function(s){
-          var info = getAlert ? null : null;
-          return (
+            return (
             <div key={s.id} style={{borderRadius:12,overflow:"hidden",border:"1.5px solid "+GREEN.main+"20"}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:GREEN.light,cursor:"pointer"}}
                 onClick={function(){ setExpanded(function(prev){ var n=Object.assign({},prev); n[s.id]=!n[s.id]; return n; }); }}>
