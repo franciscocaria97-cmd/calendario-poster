@@ -1,0 +1,1459 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Calendario de Pagos — Poster</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231a3a6b'/%3E%3Cellipse cx='58' cy='62' rx='18' ry='11' fill='%238fac2e'/%3E%3Cpath d='M22 74 Q26 42 54 26' stroke='white' stroke-width='10' stroke-linecap='round' fill='none'/%3E%3Cpath d='M12 82 Q16 32 58 14' stroke='white' stroke-width='7' stroke-linecap='round' fill='none' opacity='0.45'/%3E%3C/svg%3E"/>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,700;9..144,800&display=swap" rel="stylesheet"/>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background: #F4F6FB; }
+    button { cursor: pointer; border: none; background: none; font-family: inherit; }
+    input, select { font-family: inherit; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+    @keyframes shake  { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-8px)} 40%{transform:translateX(8px)} 60%{transform:translateX(-5px)} 80%{transform:translateX(5px)} }
+    @keyframes spin   { to { transform: rotate(360deg); } }
+    .fade-in { animation: fadeIn 0.22s ease; }
+    .shake   { animation: shake 0.4s ease; }
+    .chip    { transition: all 0.15s; cursor: pointer; }
+    .chip:hover { transform: translateY(-1px); filter: brightness(0.95); }
+    input:focus, select:focus { outline: none; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const SUPA_URL = "https://tzywtsxgfgmcglamyuar.supabase.co";
+const SUPA_KEY = "sb_publishable_3TZrHDWcuOhlmjyLPaaIgA_PuO7Opxd";
+
+async function supa(path, opts) {
+  if (!opts) opts = {};
+  const res = await fetch(SUPA_URL + "/rest/v1/" + path, {
+    headers: { apikey: SUPA_KEY, Authorization: "Bearer " + SUPA_KEY, "Content-Type": "application/json", Prefer: opts.prefer || "return=representation" },
+    method: opts.method || "GET",
+    body: opts.body || undefined,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
+}
+const db = {
+  get:    function(t, q)    { return supa(t + "?" + (q||"")); },
+  insert: function(t, b)    { return supa(t, { method:"POST", body:JSON.stringify(b) }); },
+  update: function(t, q, b) { return supa(t + "?" + q, { method:"PATCH", body:JSON.stringify(b) }); },
+  delete: function(t, q)    { return supa(t + "?" + q, { method:"DELETE", prefer:"return=minimal" }); },
+};
+
+const MONTHS     = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+const DAYS_SHORT = ["Dom","Lun","Mar","Mie","Jue","Vie","Sab"];
+const BLUE  = { main:"#1a3a6b", light:"#e8f0ff", soft:"#f0f4ff", hover:"#EEF2FF" };
+const GREEN = { main:"#6a9c1f", light:"#edf5d0", soft:"#f4fae8", hover:"#EDF7D0" };
+
+const AFIP_CATS = [
+  { label:"Moratoria",                color:"#E8A838", light:"#FEF3D7" },
+  { label:"CCSS",                     color:"#5B8DEF", light:"#E8F0FF" },
+  { label:"IVA",                      color:"#E85B5B", light:"#FDE8E8" },
+  { label:"IIBB",                     color:"#9B59B6", light:"#F3E8FD" },
+  { label:"Anticipos Ganancias",      color:"#27AE60", light:"#E4F9ED" },
+  { label:"Impuesto a las Ganancias", color:"#16A085", light:"#E0F5F1" },
+  { label:"Tasas Municipales",        color:"#D35400", light:"#FDEBD0" },
+  { label:"Retencion de Dividendos",  color:"#2C3E50", light:"#E8ECF0" },
+  { label:"Otro",                     color:"#95A5A6", light:"#F2F3F4" },
+];
+
+function getCat(label) {
+  var found = AFIP_CATS.filter(function(c){ return c.label === label; });
+  return found.length > 0 ? found[0] : AFIP_CATS[AFIP_CATS.length-1];
+}
+function daysInMonth(y,m) { return new Date(y,m+1,0).getDate(); }
+function firstDay(y,m)    { return new Date(y,m,1).getDay(); }
+function fmt(n) {
+  return new Intl.NumberFormat("es-AR",{style:"currency",currency:"ARS",minimumFractionDigits:2,maximumFractionDigits:2}).format(n||0);
+}
+
+function Spinner(props) {
+  var color = props.color || "#1a3a6b";
+  return <div style={{width:24,height:24,border:"3px solid "+color+"30",borderTop:"3px solid "+color,borderRadius:"50%",animation:"spin 0.7s linear infinite"}}/>;
+}
+
+function PosterLogo(props) {
+  var width = props.width || 150;
+  return (
+    <svg width={width} height={width*0.28} viewBox="0 0 320 88" fill="none">
+      <ellipse cx="52" cy="52" rx="20" ry="13" fill="#8fac2e"/>
+      <path d="M18 62 Q20 34 46 20" stroke="#1a3a6b" strokeWidth="9" strokeLinecap="round" fill="none"/>
+      <path d="M10 72 Q12 28 52 8" stroke="#1a3a6b" strokeWidth="7" strokeLinecap="round" fill="none" opacity="0.5"/>
+      <text x="72" y="66" fontFamily="Arial Black, sans-serif" fontWeight="900" fontSize="52" fill="#1a3a6b" letterSpacing="-1">POSTER</text>
+    </svg>
+  );
+}
+
+const IconCalendar = function() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
+};
+const IconRepeat = function() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>;
+};
+const IconTruck = function() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>;
+};
+const IconDoc = function() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>;
+};
+
+// ── Login ──
+function LoginScreen(props) {
+  const [user,setUser] = useState("");
+  const [pass,setPass] = useState("");
+  const [error,setError] = useState(false);
+  const [shake,setShake] = useState(false);
+
+  function handleLogin() {
+    if (user === "Poster" && pass === "123") { props.onLogin(); }
+    else { setError(true); setShake(true); setTimeout(function(){ setShake(false); }, 500); }
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:"#F4F6FB",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div className={"fade-in" + (shake ? " shake" : "")} style={{background:"#fff",borderRadius:24,padding:"44px 38px",width:"100%",maxWidth:380,boxShadow:"0 8px 40px #00000010"}}>
+        <div style={{display:"flex",justifyContent:"center",marginBottom:32}}><PosterLogo width={160}/></div>
+        <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:21,color:"#1A1D2E",marginBottom:6,textAlign:"center"}}>Calendario de Pagos</h2>
+        <p style={{fontSize:13,color:"#8892A4",fontWeight:600,textAlign:"center",marginBottom:28}}>Ingresa tus credenciales para continuar</p>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div>
+            <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:0.5}}>Usuario</label>
+            <input value={user} onChange={function(e){setUser(e.target.value);setError(false);}} onKeyDown={function(e){if(e.key==="Enter")handleLogin();}}
+              placeholder="Usuario" style={{width:"100%",padding:"12px 14px",borderRadius:12,border:"1.5px solid "+(error?"#E85B5B":"#E5E9F0"),fontSize:14,fontWeight:600}}/>
+          </div>
+          <div>
+            <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:0.5}}>Contrasena</label>
+            <input value={pass} type="password" onChange={function(e){setPass(e.target.value);setError(false);}} onKeyDown={function(e){if(e.key==="Enter")handleLogin();}}
+              placeholder="••••••" style={{width:"100%",padding:"12px 14px",borderRadius:12,border:"1.5px solid "+(error?"#E85B5B":"#E5E9F0"),fontSize:14,fontWeight:600}}/>
+          </div>
+          {error && <p style={{fontSize:12,color:"#E85B5B",fontWeight:700,textAlign:"center"}}>Usuario o contrasena incorrectos</p>}
+          <button onClick={handleLogin} style={{marginTop:4,padding:"13px 0",borderRadius:12,background:"#1a3a6b",color:"#fff",fontWeight:900,fontSize:15,boxShadow:"0 4px 14px #1a3a6b30"}}>Ingresar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Welcome Popup ──
+function WelcomePopup(props) {
+  const now = new Date();
+  const today = now.getDate();
+  const month = now.getMonth();
+  const year = now.getFullYear();
+  const mk = year + "-" + month;
+  const [todayPays, setTodayPays] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(function(){
+    async function load() {
+      try {
+        const afip = await db.get("afip_payments", "month_key=eq."+mk+"&day=eq."+today);
+        const prov = await db.get("prov_payments", "month_key=eq."+mk+"&day=eq."+today);
+        const all = afip.concat(prov.map(function(p){ return Object.assign({}, p, {name:p.supplier, category:"Proveedor"}); }));
+        setTodayPays(all);
+      } catch(e){ console.error(e); }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const pendientes = todayPays.filter(function(p){ return !p.paid; });
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#00000060",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16,backdropFilter:"blur(6px)"}}>
+      <div className="fade-in" style={{background:"#fff",borderRadius:24,padding:32,width:"100%",maxWidth:420,boxShadow:"0 30px 80px #0003",textAlign:"center"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:16}}>
+          <svg width="20" height="20" viewBox="0 0 44 44" fill="none">
+            <ellipse cx="30" cy="28" rx="12" ry="7" fill="#8fac2e"/>
+            <path d="M6 34 Q8 18 26 10" stroke="#1a3a6b" strokeWidth="5" strokeLinecap="round" fill="none"/>
+            <path d="M2 38 Q4 14 28 4" stroke="#1a3a6b" strokeWidth="3.5" strokeLinecap="round" fill="none" opacity="0.4"/>
+          </svg>
+          <span style={{fontFamily:"Arial Black, sans-serif",fontWeight:900,fontSize:18,color:"#1a3a6b"}}>POSTER</span>
+        </div>
+        <div style={{fontSize:32,marginBottom:8}}>{todayPays.length > 0 ? (pendientes.length > 0 ? "📋" : "✅") : "✨"}</div>
+        <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:22,color:"#1A1D2E",marginBottom:6}}>Buen dia, Marisa!</h2>
+        <p style={{fontSize:13,color:"#8892A4",fontWeight:600,marginBottom:20}}>
+          {now.toLocaleDateString("es-AR",{weekday:"long",day:"numeric",month:"long"})}
+        </p>
+        {loading ? <Spinner color={BLUE.main}/> : todayPays.length > 0 ? (
+          <div style={{textAlign:"left"}}>
+            <p style={{fontSize:13,fontWeight:700,color:"#1A1D2E",marginBottom:12}}>
+              {pendientes.length > 0 ? ("Tenes "+pendientes.length+" pago"+(pendientes.length!==1?"s":"")+" pendiente"+(pendientes.length!==1?"s":"")+" hoy:") : "Todos los pagos de hoy estan al dia!"}
+            </p>
+            <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:200,overflowY:"auto"}}>
+              {todayPays.map(function(p, i){
+                var cat = getCat(p.category);
+                return (
+                  <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:11,background:p.paid?"#F9FAFB":cat.light,opacity:p.paid?0.6:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:cat.color}}/>
+                      <span style={{fontSize:13,fontWeight:700,color:"#1A1D2E"}}>{p.name}</span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:13,fontWeight:900,color:"#1A1D2E"}}>{fmt(p.amount)}</span>
+                      {p.paid && <span style={{fontSize:11,color:"#27AE60",fontWeight:700}}>Pagado</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <p style={{fontSize:14,fontWeight:600,color:"#27AE60",padding:"16px 0"}}>Hoy no tenes pagos programados!</p>
+        )}
+        <button onClick={props.onClose} style={{marginTop:24,width:"100%",padding:"13px 0",borderRadius:12,background:BLUE.main,color:"#fff",fontWeight:900,fontSize:15}}>
+          Entrar al calendario
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Moratoria Tab ──
+function MoratoriaTab() {
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+  const cat = getCat("Moratoria");
+  const now = new Date();
+
+  useEffect(function(){ loadPlans(); }, []);
+
+  async function loadPlans() {
+    setLoading(true);
+    try {
+      const ps = await db.get("moratoria_plans", "order=plan.asc");
+      const updated = [];
+      for (var i = 0; i < ps.length; i++) {
+        var p = ps[i];
+        if (!p.active) { updated.push(p); continue; }
+        const pays = await db.get("afip_payments", "is_moratoria_plan=eq.true&plan_number=eq."+p.plan);
+        var atrasadas = 0;
+        for (var j = 0; j < pays.length; j++) {
+          var pay = pays[j];
+          var parts = pay.month_key.split("-");
+          var y = parseInt(parts[0]), m = parseInt(parts[1]);
+          var venc = new Date(y, m, 19);
+          if (now > venc && !pay.paid) atrasadas++;
+        }
+        if (atrasadas !== (p.cuotas_atrasadas||0)) {
+          await db.update("moratoria_plans", "id=eq."+p.id, {cuotas_atrasadas: atrasadas});
+          updated.push(Object.assign({}, p, {cuotas_atrasadas: atrasadas}));
+        } else {
+          updated.push(p);
+        }
+      }
+      setPlans(updated);
+    } catch(e){ console.error(e); }
+    setLoading(false);
+  }
+
+  async function updatePlan(id, field, value) {
+    setSaving(id);
+    try { await db.update("moratoria_plans","id=eq."+id,{[field]:value}); await loadPlans(); } catch(e){console.error(e);}
+    setSaving(null);
+  }
+
+  function getAlert(p) {
+    var a = p.cuotas_atrasadas || 0;
+    var nextVenc = new Date(now.getFullYear(), now.getMonth(), 16);
+    if (nextVenc <= now) nextVenc.setMonth(nextVenc.getMonth()+1);
+    var days = Math.ceil((nextVenc-now)/(1000*60*60*24));
+    if (a===2 && days<=5) return {color:"#E85B5B",bg:"#FDE8E8",icon:"🚨",text:"Alerta! En "+days+" dia"+(days!==1?"s":"")+" podrias llegar a 3 cuotas atrasadas"};
+    if (a>=3) return {color:"#E85B5B",bg:"#FDE8E8",icon:"🔴",text:a+" cuotas atrasadas"};
+    if (a===2) return {color:"#E8A838",bg:"#FEF3D7",icon:"🟡",text:a+" cuotas atrasadas"};
+    if (a===1) return {color:"#27AE60",bg:"#E4F9ED",icon:"🟢",text:a+" cuota atrasada"};
+    return null;
+  }
+
+  const activePlans = plans.filter(function(p){ return p.active; });
+  const total = activePlans.reduce(function(s,p){ return s+p.amount; }, 0);
+  const alerts = activePlans.filter(function(p){ return (p.cuotas_atrasadas||0)>0; });
+
+  if (loading) return <div style={{display:"flex",justifyContent:"center",padding:40}}><Spinner color={cat.color}/></div>;
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {alerts.length > 0 && alerts.map(function(p){
+        var info = getAlert(p);
+        if (!info) return null;
+        return (
+          <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:info.bg,borderLeft:"4px solid "+info.color,borderRadius:10}}>
+            <span style={{fontSize:16}}>{info.icon}</span>
+            <span style={{fontSize:13,fontWeight:700,color:info.color}}>Plan {p.plan}: {info.text}</span>
+          </div>
+        );
+      })}
+      <div style={{borderRadius:12,overflow:"hidden",border:"1.5px solid "+cat.color+"25"}}>
+        <div onClick={function(){ setExpanded(function(e){ return !e; }); }} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 16px",background:cat.light,cursor:"pointer"}}>
+          <div style={{display:"flex",alignItems:"center",gap:14}}>
+            <div style={{width:44,height:44,borderRadius:12,background:cat.color,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:"#fff",boxShadow:"0 4px 10px "+cat.color+"50"}}>
+              <span style={{fontSize:9,fontWeight:700,textTransform:"uppercase"}}>Dia</span>
+              <span style={{fontSize:15,fontWeight:900,lineHeight:1}}>16</span>
+            </div>
+            <div>
+              <p style={{fontWeight:800,fontSize:14,color:"#1A1D2E"}}>Moratoria</p>
+              <p style={{fontSize:12,color:cat.color,fontWeight:700}}>{activePlans.length} planes activos</p>
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontWeight:900,fontSize:15,color:"#1A1D2E"}}>{fmt(total)}</span>
+            <span style={{fontSize:20,color:cat.color,fontWeight:900,lineHeight:1}}>{expanded ? "−" : "+"}</span>
+          </div>
+        </div>
+        {expanded && (
+          <div style={{background:"#fff",padding:"12px 16px",display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{display:"grid",gridTemplateColumns:"auto 1fr 70px 70px",gap:8,padding:"0 4px",marginBottom:4}}>
+              {["","Plan / Monto","Cuotas","Atraso"].map(function(h){ return <span key={h} style={{fontSize:10,fontWeight:800,color:"#8892A4",textTransform:"uppercase"}}>{h}</span>; })}
+            </div>
+            {plans.map(function(p){
+              var info = getAlert(p);
+              var a = p.cuotas_atrasadas || 0;
+              return (
+                <div key={p.id} style={{borderRadius:10,overflow:"hidden",border:"1px solid "+(p.active ? (info ? info.color+"40" : cat.color+"30") : "#F0F2F8")}}>
+                  <div style={{display:"grid",gridTemplateColumns:"auto 1fr 70px 70px",gap:8,padding:"9px 12px",background:p.active ? (info ? info.bg : cat.light) : "#F9FAFB",alignItems:"center"}}>
+                    <input type="checkbox" checked={p.active||false} onChange={function(e){ updatePlan(p.id,"active",e.target.checked); }}
+                      style={{width:15,height:15,accentColor:cat.color,cursor:"pointer"}}/>
+                    <div>
+                      <span style={{fontSize:12,fontWeight:700,color:"#1A1D2E",marginRight:8}}>Plan {p.plan}</span>
+                      <input type="number" value={p.amount||""} placeholder="$0"
+                        onBlur={function(e){ updatePlan(p.id,"amount",parseFloat(e.target.value)||0); }}
+                        onChange={function(e){ setPlans(function(prev){ return prev.map(function(x){ return x.id===p.id ? Object.assign({},x,{amount:parseFloat(e.target.value)||0}) : x; }); }); }}
+                        style={{width:90,padding:"4px 8px",borderRadius:7,border:"1.5px solid "+(p.active ? cat.color+"50" : "#E5E9F0"),fontSize:12,fontWeight:700}}/>
+                    </div>
+                    {p.active ? (
+                      <input type="number" value={p.total_cuotas||""} placeholder="0" title="Total cuotas"
+                        onBlur={function(e){ updatePlan(p.id,"total_cuotas",parseInt(e.target.value)||0); }}
+                        onChange={function(e){ setPlans(function(prev){ return prev.map(function(x){ return x.id===p.id ? Object.assign({},x,{total_cuotas:parseInt(e.target.value)||0}) : x; }); }); }}
+                        style={{width:"100%",padding:"4px 6px",borderRadius:7,border:"1.5px solid #E5E9F0",fontSize:12,fontWeight:800,textAlign:"center"}}/>
+                    ) : <div/>}
+                    {p.active ? (
+                      <div style={{padding:"4px 6px",borderRadius:7,background:a>0?(info?info.bg:"#F9FAFB"):"#F9FAFB",border:"1.5px solid "+(a>0?(info?info.color:"#E5E9F0"):"#E5E9F0"),fontSize:13,fontWeight:900,textAlign:"center",color:a>0?(info?info.color:"#1A1D2E"):"#8892A4"}}>
+                        {a}
+                      </div>
+                    ) : <div/>}
+                    {saving===p.id && <Spinner color={cat.color}/>}
+                  </div>
+                  {p.active && info && (
+                    <div style={{padding:"5px 12px",background:info.bg,display:"flex",alignItems:"center",gap:6}}>
+                      <span>{info.icon}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:info.color}}>{info.text}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Metodo de Pago Modal ──
+function MetodoPagoModal(props) {
+  const [selected, setSelected] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const METODOS = ["VEP","Transferencia bancaria","Homebanking / Pago mis cuentas","Efectivo","Brubank"];
+
+  async function confirm() {
+    if (!selected) return;
+    setSaving(true);
+    await props.onConfirm(selected);
+    setSaving(false);
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#00000055",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16,backdropFilter:"blur(4px)"}}>
+      <div className="fade-in" style={{background:"#fff",borderRadius:22,padding:30,width:"100%",maxWidth:380,boxShadow:"0 30px 80px #0003"}}>
+        <div style={{width:4,height:32,background:BLUE.main,borderRadius:4,marginBottom:16}}/>
+        <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:20,color:"#1A1D2E",marginBottom:6}}>Como se realizo el pago?</h2>
+        <p style={{fontSize:13,color:"#8892A4",fontWeight:600,marginBottom:20}}>Selecciona el metodo utilizado.</p>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
+          {METODOS.map(function(m){
+            return (
+              <label key={m} onClick={function(){ setSelected(m); }} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderRadius:11,background:selected===m?BLUE.soft:"#F9FAFB",border:"1.5px solid "+(selected===m?BLUE.main:BLUE.light),cursor:"pointer"}}>
+                <input type="radio" checked={selected===m} onChange={function(){ setSelected(m); }} style={{width:18,height:18,accentColor:BLUE.main}}/>
+                <span style={{fontSize:14,fontWeight:selected===m?800:600,color:selected===m?BLUE.main:"#4A5568"}}>{m}</span>
+              </label>
+            );
+          })}
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={props.onClose} style={{flex:1,padding:"11px 0",borderRadius:11,background:"#F4F6FB",color:"#4A5568",fontWeight:800,fontSize:14}}>Cancelar</button>
+          <button onClick={confirm} disabled={!selected||saving} style={{flex:2,padding:"11px 0",borderRadius:11,background:selected?BLUE.main:"#CDD0DA",color:"#fff",fontWeight:900,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            {saving ? <Spinner color="#fff"/> : "Aceptar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Historial AFIP ──
+function HistorialAFIP() {
+  const [pagos, setPagos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterCat, setFilterCat] = useState("Todas");
+  const [filterStatus, setFilterStatus] = useState("Todos");
+  const [openMonths, setOpenMonths] = useState({});
+
+  useEffect(function(){
+    async function load() {
+      setLoading(true);
+      try {
+        const pays = await db.get("afip_payments", "order=month_key.asc,day.asc");
+        const recs  = await db.get("afip_recurring", "order=day.asc");
+        const plans = await db.get("moratoria_plans", "order=plan.asc&active=eq.true");
+        const existingMks = {};
+        for (var i = 0; i < pays.length; i++) existingMks[pays[i].month_key] = true;
+        var allPays = pays.slice();
+        var allMks = [];
+        for (var m = 0; m < 12; m++) allMks.push("2026-"+m);
+        for (var mi = 0; mi < allMks.length; mi++) {
+          var mk = allMks[mi];
+          if (existingMks[mk]) continue;
+          var newRows = recs.map(function(r){ return {month_key:mk,day:r.day,name:r.name,amount:r.amount,category:r.category,paid:false,recur_id:r.id}; });
+          var morRows = plans.map(function(p){ return {month_key:mk,day:16,name:"Moratoria Plan "+p.plan,amount:p.amount,category:"Moratoria",paid:false,is_moratoria_plan:true,plan_number:p.plan}; });
+          var toInsert = newRows.concat(morRows);
+          if (toInsert.length > 0) {
+            try {
+              var inserted = await db.insert("afip_payments", toInsert);
+              if (Array.isArray(inserted)) allPays = allPays.concat(inserted);
+            } catch(e){ console.error(e); }
+          }
+        }
+        setPagos(allPays);
+      } catch(e){ console.error(e); }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const filtered = pagos.filter(function(p){
+    if (filterCat !== "Todas" && p.category !== filterCat) return false;
+    if (filterStatus === "Pagado" && !p.paid) return false;
+    if (filterStatus === "Pendiente" && p.paid) return false;
+    return true;
+  });
+
+  var byMonthAll = {};
+  for (var i = 0; i < pagos.length; i++) {
+    var p = pagos[i];
+    if (!byMonthAll[p.month_key]) byMonthAll[p.month_key] = [];
+    byMonthAll[p.month_key].push(p);
+  }
+  var byMonth = {};
+  for (var j = 0; j < filtered.length; j++) {
+    var fp = filtered[j];
+    if (!byMonth[fp.month_key]) byMonth[fp.month_key] = [];
+    byMonth[fp.month_key].push(fp);
+  }
+
+  var allMks2026 = [];
+  for (var m2 = 0; m2 < 12; m2++) allMks2026.push("2026-"+m2);
+
+  function monthLabel(mk) {
+    var parts = mk.split("-");
+    return MONTHS[parseInt(parts[1])] + " " + parts[0];
+  }
+
+  function toggleMonth(mk) {
+    setOpenMonths(function(prev){ var n = Object.assign({}, prev); n[mk] = !n[mk]; return n; });
+  }
+
+  function fmtDate(mk, day) {
+    var parts = mk.split("-").map(Number);
+    return String(day).padStart(2,"0") + "/" + String(parts[1]+1).padStart(2,"0") + "/" + parts[0];
+  }
+
+  return (
+    <div className="fade-in">
+      <div style={{background:"#fff",borderRadius:16,padding:24,boxShadow:"0 1px 3px #0001"}}>
+        <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:18,color:"#1A1D2E",marginBottom:4}}>Historial de Pagos — Impuestos</h2>
+        <p style={{fontSize:13,color:"#8892A4",fontWeight:600,marginBottom:20}}>Los 12 meses de 2026 en orden cronologico.</p>
+        <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
+          <select value={filterCat} onChange={function(e){ setFilterCat(e.target.value); }}
+            style={{padding:"8px 12px",borderRadius:10,border:"1.5px solid "+BLUE.light,fontSize:13,fontWeight:600,background:"#fff"}}>
+            <option value="Todas">Todas las categorias</option>
+            {AFIP_CATS.map(function(c){ return <option key={c.label} value={c.label}>{c.label}</option>; })}
+          </select>
+          <select value={filterStatus} onChange={function(e){ setFilterStatus(e.target.value); }}
+            style={{padding:"8px 12px",borderRadius:10,border:"1.5px solid "+BLUE.light,fontSize:13,fontWeight:600,background:"#fff"}}>
+            <option value="Todos">Todos los estados</option>
+            <option value="Pagado">Pagado</option>
+            <option value="Pendiente">Pendiente</option>
+          </select>
+          <span style={{fontSize:13,fontWeight:600,color:"#8892A4"}}>{filtered.length} resultado{filtered.length!==1?"s":""}</span>
+        </div>
+        {loading ? <div style={{display:"flex",justifyContent:"center",padding:40}}><Spinner color={BLUE.main}/></div> : (
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {allMks2026.map(function(mk){
+              var items = byMonth[mk] || [];
+              var allItems = byMonthAll[mk] || [];
+              var isOpen = openMonths[mk] === true;
+              var total = allItems.reduce(function(s,p){ return s+(p.amount||0); }, 0);
+              var pagados = allItems.filter(function(p){ return p.paid; }).length;
+              var pendientes2 = allItems.filter(function(p){ return !p.paid; }).length;
+              var monthAbbr = MONTHS[parseInt(mk.split("-")[1])].slice(0,3).toUpperCase();
+              return (
+                <div key={mk} style={{borderRadius:14,overflow:"hidden",border:"1.5px solid "+BLUE.light}}>
+                  <div onClick={function(){ toggleMonth(mk); }} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 18px",background:BLUE.soft,cursor:"pointer"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{width:38,height:38,borderRadius:10,background:BLUE.main,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:900,fontSize:12}}>
+                        {monthAbbr}
+                      </div>
+                      <div>
+                        <p style={{fontWeight:800,fontSize:15,color:"#1A1D2E"}}>{monthLabel(mk)}</p>
+                        <p style={{fontSize:12,color:"#8892A4",fontWeight:600}}>
+                          {allItems.length > 0 ? (
+                            pagados+"/"+allItems.length+" pagados · "+fmt(total)
+                          ) : "Sin datos — navega este mes primero"}
+                        </p>
+                      </div>
+                    </div>
+                    <span style={{fontSize:20,color:BLUE.main,fontWeight:900,lineHeight:1}}>{isOpen ? "−" : "+"}</span>
+                  </div>
+                  {isOpen && (
+                    <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:6}}>
+                      {items.length === 0 ? (
+                        <p style={{fontSize:13,color:"#B0B8C8",fontWeight:600,textAlign:"center",padding:"20px 0"}}>
+                          {allItems.length === 0 ? "Navega a este mes en el calendario para cargar datos." : "Sin resultados con los filtros actuales."}
+                        </p>
+                      ) : (
+                        <>
+                          <div style={{display:"grid",gridTemplateColumns:"80px 1fr 110px 100px 130px",gap:10,padding:"4px 8px",marginBottom:2}}>
+                            {["Dia","Concepto","Monto","Estado","Metodo"].map(function(h){ return <span key={h} style={{fontSize:10,fontWeight:800,color:"#8892A4",textTransform:"uppercase"}}>{h}</span>; })}
+                          </div>
+                          {items.map(function(p){
+                            var cat = getCat(p.category);
+                            return (
+                              <div key={p.id} style={{display:"grid",gridTemplateColumns:"80px 1fr 110px 100px 130px",gap:10,padding:"10px 8px",borderRadius:10,background:p.paid?"#F9FAFB":cat.light,alignItems:"center"}}>
+                                <span style={{fontSize:12,fontWeight:700,color:"#4A5568"}}>Dia {p.day}</span>
+                                <div style={{display:"flex",alignItems:"center",gap:7}}>
+                                  <div style={{width:7,height:7,borderRadius:"50%",background:cat.color,flexShrink:0}}/>
+                                  <div>
+                                    <p style={{fontSize:13,fontWeight:700,color:"#1A1D2E"}}>{p.name}</p>
+                                    <p style={{fontSize:10,color:cat.color,fontWeight:600}}>{p.category}</p>
+                                  </div>
+                                </div>
+                                <span style={{fontSize:13,fontWeight:900,color:"#1A1D2E"}}>{fmt(p.amount)}</span>
+                                <div style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:20,background:p.paid?"#E4F9ED":"#FEF3D7"}}>
+                                  <div style={{width:5,height:5,borderRadius:"50%",background:p.paid?"#27AE60":"#E8A838",flexShrink:0}}/>
+                                  <span style={{fontSize:10,fontWeight:800,color:p.paid?"#27AE60":"#E8A838",whiteSpace:"nowrap"}}>{p.paid?"Pagado":"Pendiente"}</span>
+                                </div>
+                                <span style={{fontSize:11,fontWeight:600,color:p.metodo_pago?"#4A5568":"#CDD0DA"}}>{p.metodo_pago||"—"}</span>
+                              </div>
+                            );
+                          })}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── AFIP Calendar ──
+function AfipCalendar() {
+  const now = new Date();
+  const [year,setYear]   = useState(now.getFullYear());
+  const [month,setMonth] = useState(now.getMonth());
+  const [payments,setPayments] = useState([]);
+  const [recurring,setRecurring] = useState([]);
+  const [subTab,setSubTab] = useState("calendar");
+  const [modal,setModal]   = useState(null);
+  const [dayModal,setDayModal] = useState(null);
+  const [form,setForm]     = useState({name:"",amount:"",category:"IVA",recurring:false});
+  const [loading,setLoading] = useState(true);
+  const [saving,setSaving]   = useState(false);
+  const [metodoPagoModal, setMetodoPagoModal] = useState(null);
+  const [historialKey, setHistorialKey] = useState(0);
+  const cache = useRef({});
+
+  const mk = year + "-" + month;
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [pays, recs, plans] = await Promise.all([
+        db.get("afip_payments","month_key=eq."+mk+"&order=day.asc"),
+        db.get("afip_recurring","order=day.asc"),
+        db.get("moratoria_plans","order=plan.asc"),
+      ]);
+      setRecurring(recs);
+      const existingRecurIds = pays.map(function(p){ return p.recur_id; }).filter(Boolean);
+      const toAdd = recs.filter(function(r){ return !existingRecurIds.includes(r.id); });
+      var allPays = pays.slice();
+      if (toAdd.length > 0) {
+        const newRows = toAdd.map(function(r){ return {month_key:mk,day:r.day,name:r.name,amount:r.amount,category:r.category,paid:false,recur_id:r.id}; });
+        const inserted = await db.insert("afip_payments", newRows);
+        if (Array.isArray(inserted)) allPays = allPays.concat(inserted);
+      }
+      const activePlans = plans.filter(function(p){ return p.active; });
+      const existingMorNames = allPays.filter(function(p){ return p.is_moratoria_plan; }).map(function(p){ return p.plan_number; });
+      const morToAdd = activePlans.filter(function(p){ return !existingMorNames.includes(p.plan); });
+      if (morToAdd.length > 0) {
+        const newMor = morToAdd.map(function(p){ return {month_key:mk,day:16,name:"Moratoria Plan "+p.plan,amount:p.amount,category:"Moratoria",paid:false,is_moratoria_plan:true,plan_number:p.plan}; });
+        const inserted2 = await db.insert("afip_payments", newMor);
+        if (Array.isArray(inserted2)) allPays = allPays.concat(inserted2);
+      }
+      allPays.sort(function(a,b){ return a.day-b.day; });
+      setPayments(allPays);
+    } catch(e){ console.error(e); }
+    setLoading(false);
+  }
+
+  useEffect(function(){ loadData(); }, [mk]);
+
+  function handleSubTab(t) {
+    if (t === "historial") setHistorialKey(function(k){ return k+1; });
+    setSubTab(t);
+  }
+
+  async function savePayment() {
+    if (!form.name.trim() || !form.amount) return;
+    const amount = parseFloat(String(form.amount).replace(/[^0-9.]/g,""));
+    if (isNaN(amount)) return;
+    setSaving(true);
+    try {
+      if (modal.editId) {
+        await db.update("afip_payments","id=eq."+modal.editId,{name:form.name,amount,category:form.category});
+      } else {
+        var recur_id = null;
+        if (form.recurring) {
+          const newRec = await db.insert("afip_recurring",{day:modal.day,name:form.name,amount,category:form.category});
+          if (Array.isArray(newRec) && newRec.length > 0) recur_id = newRec[0].id;
+        }
+        await db.insert("afip_payments",{month_key:mk,day:modal.day,name:form.name,amount,category:form.category,paid:false,recur_id});
+      }
+      await loadData();
+    } catch(e){ console.error(e); }
+    setSaving(false);
+    setModal(null);
+  }
+
+  async function deletePayment(id) {
+    setSaving(true);
+    await db.delete("afip_payments","id=eq."+id);
+    await loadData();
+    setSaving(false);
+    setModal(null);
+  }
+
+  const byDay = {};
+  payments.forEach(function(p){ if(!byDay[p.day]) byDay[p.day]=[]; byDay[p.day].push(p); });
+  const totalDays = daysInMonth(year,month), startOffset = firstDay(year,month);
+  const grid = [];
+  for(var i=0;i<startOffset;i++) grid.push(null);
+  for(var d=1;d<=totalDays;d++) grid.push(d);
+  while(grid.length%7!==0) grid.push(null);
+  const today = now.getDate(), isCurr = year===now.getFullYear()&&month===now.getMonth();
+
+  return (
+    <div className="fade-in">
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        {[["calendar","Calendario",<IconCalendar/>],["recurring","Fijos",<IconRepeat/>],["historial","Historial Impuestos",<IconDoc/>]].map(function(item){
+          var t=item[0], label=item[1], icon=item[2];
+          return (
+            <button key={t} onClick={function(){ handleSubTab(t); }} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 16px",borderRadius:10,fontSize:13,fontWeight:700,background:subTab===t?BLUE.main:"#fff",color:subTab===t?"#fff":"#8892A4",boxShadow:subTab===t?"0 4px 12px "+BLUE.main+"30":"0 1px 3px #0001"}}>
+              {icon}{label}
+            </button>
+          );
+        })}
+      </div>
+
+      {subTab==="calendar" && (<>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fff",borderRadius:16,padding:"14px 22px",marginBottom:14,boxShadow:"0 1px 3px #0001"}}>
+          <button onClick={function(){ if(month===0){setMonth(11);setYear(function(y){return y-1;});}else setMonth(function(m){return m-1;}); }} style={{width:38,height:38,borderRadius:10,background:BLUE.light,color:BLUE.main,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800}}>‹</button>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <span style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:22,color:"#1A1D2E"}}>{MONTHS[month]} {year}</span>
+            <button onClick={function(){ cache.current={}; loadData(); }} title="Actualizar" style={{width:32,height:32,borderRadius:9,background:BLUE.light,color:BLUE.main,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>↻</button>
+          </div>
+          <button onClick={function(){ if(month===11){setMonth(0);setYear(function(y){return y+1;});}else setMonth(function(m){return m+1;}); }} style={{width:38,height:38,borderRadius:10,background:BLUE.light,color:BLUE.main,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800}}>›</button>
+        </div>
+        {loading ? <div style={{display:"flex",justifyContent:"center",padding:60}}><Spinner color={BLUE.main}/></div> : (
+          <div style={{background:"#fff",borderRadius:16,overflow:"hidden",boxShadow:"0 1px 3px #0001"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",background:"#F4F6FB"}}>
+              {DAYS_SHORT.map(function(d){ return <div key={d} style={{textAlign:"center",padding:"11px 4px",fontSize:11,fontWeight:800,color:"#8892A4",textTransform:"uppercase"}}>{d}</div>; })}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gridAutoRows:"170px"}}>
+              {grid.map(function(day,i){
+                if(!day) return <div key={"e"+i} style={{borderRight:"1px solid #F0F2F8",borderBottom:"1px solid #F0F2F8",background:"#FAFBFC"}}/>;
+                const dp = byDay[day]||[], isToday = isCurr&&day===today;
+                const moratorias = dp.filter(function(p){ return p.is_moratoria_plan; });
+                const others = dp.filter(function(p){ return !p.is_moratoria_plan; });
+                const morTotal = moratorias.reduce(function(s,p){ return s+p.amount; },0);
+                const morAllPaid = moratorias.length>0 && moratorias.every(function(p){ return p.paid; });
+                const morCat = getCat("Moratoria");
+                return (
+                  <div key={day} onClick={function(){ setDayModal({day:day, payments: byDay[day]||[]}); }}
+                    style={{borderRight:"1px solid #F0F2F8",borderBottom:"1px solid #F0F2F8",padding:"7px 5px",cursor:"pointer",background:isToday?BLUE.soft:"#fff",overflow:"hidden"}}
+                    onMouseEnter={function(e){ e.currentTarget.style.background=isToday?BLUE.soft:BLUE.hover; }}
+                    onMouseLeave={function(e){ e.currentTarget.style.background=isToday?BLUE.soft:"#fff"; }}>
+                    <span style={{width:24,height:24,borderRadius:"50%",fontSize:12,fontWeight:800,background:isToday?BLUE.main:"transparent",color:isToday?"#fff":"#1A1D2E",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:4}}>{day}</span>
+                    <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                      {others.map(function(p){
+                        var c = getCat(p.category);
+                        return (
+                          <div key={p.id} style={{background:p.paid?"#F4F6FB":c.light,borderLeft:"3px solid "+(p.paid?"#D0D5E0":c.color),borderRadius:"0 6px 6px 0",padding:"4px 6px",opacity:p.paid?0.55:1}}>
+                            <span style={{fontSize:11,fontWeight:800,color:p.paid?"#8892A4":c.color,display:"block",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:80}}>{p.name}</span>
+                            <p style={{fontSize:11,fontWeight:900,color:p.paid?"#8892A4":"#1A1D2E",marginTop:1}}>{fmt(p.amount)}</p>
+                          </div>
+                        );
+                      })}
+                      {moratorias.length > 0 && (
+                        <div onClick={function(e){ e.stopPropagation(); setDayModal({day:day,payments:moratorias,isMoratoria:true}); }}
+                          style={{background:morAllPaid?"#F4F6FB":morCat.light,borderLeft:"3px solid "+(morAllPaid?"#D0D5E0":morCat.color),borderRadius:"0 6px 6px 0",padding:"4px 6px",opacity:morAllPaid?0.55:1,cursor:"pointer"}}>
+                          <span style={{fontSize:11,fontWeight:800,color:morAllPaid?"#8892A4":morCat.color,display:"block"}}>Moratoria ({moratorias.length})</span>
+                          <p style={{fontSize:11,fontWeight:900,color:morAllPaid?"#8892A4":"#1A1D2E",marginTop:1}}>{fmt(morTotal)}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </>)}
+
+      {subTab==="recurring" && (
+        <div style={{background:"#fff",borderRadius:16,padding:24,boxShadow:"0 1px 3px #0001"}}>
+          <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:18,color:"#1A1D2E",marginBottom:4}}>Pagos Fijos — Impuestos</h2>
+          <p style={{fontSize:13,color:"#8892A4",fontWeight:600,marginBottom:20}}>Se reflejan automaticamente cada mes.</p>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <MoratoriaTab/>
+            {recurring.filter(function(r){ return r.category!=="Moratoria"; }).sort(function(a,b){ return a.day-b.day; }).map(function(r){
+              var cat = getCat(r.category);
+              return (
+                <div key={r.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"13px 16px",borderRadius:12,background:cat.light,border:"1.5px solid "+cat.color+"25"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:14}}>
+                    <div style={{width:44,height:44,borderRadius:12,background:cat.color,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:"#fff",boxShadow:"0 4px 10px "+cat.color+"50"}}>
+                      <span style={{fontSize:9,fontWeight:700,textTransform:"uppercase"}}>Dia</span>
+                      <span style={{fontSize:16,fontWeight:900,lineHeight:1}}>{r.day}</span>
+                    </div>
+                    <p style={{fontWeight:800,fontSize:15,color:cat.color}}>{r.name}</p>
+                  </div>
+                  <span style={{fontWeight:900,fontSize:15,color:"#1A1D2E"}}>{fmt(r.amount)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {subTab==="historial" && <HistorialAFIP key={historialKey}/>}
+
+      {dayModal && !modal && (
+        <div onClick={function(){ setDayModal(null); }} style={{position:"fixed",inset:0,background:"#00000055",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16,backdropFilter:"blur(4px)"}}>
+          <div onClick={function(e){ e.stopPropagation(); }} className="fade-in" style={{background:"#fff",borderRadius:22,padding:28,width:"100%",maxWidth:440,boxShadow:"0 30px 80px #0003",maxHeight:"85vh",overflowY:"auto"}}>
+            <div style={{marginBottom:20}}>
+              <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:20,color:"#1A1D2E"}}>{dayModal.day} de {MONTHS[month]}</h2>
+              {dayModal.isMoratoria && <p style={{fontSize:13,color:"#E8A838",fontWeight:700,marginTop:4}}>Desglose de Planes de Moratoria</p>}
+            </div>
+            {dayModal.payments.length === 0 ? (
+              <p style={{fontSize:14,fontWeight:600,color:"#B0B8C8",textAlign:"center",padding:"30px 0"}}>Sin pagos.</p>
+            ) : (
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {dayModal.payments.map(function(p){
+                  var cat = getCat(p.category);
+                  return (
+                    <div key={p.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",borderRadius:12,background:p.paid?"#F9FAFB":cat.light,border:"1.5px solid "+(p.paid?"#E5E9F0":cat.color)+"20"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:12}}>
+                        <div style={{width:10,height:10,borderRadius:"50%",background:cat.color}}/>
+                        <div>
+                          <p style={{fontWeight:800,fontSize:14,color:"#1A1D2E"}}>{p.name}</p>
+                          <p style={{fontSize:12,color:cat.color,fontWeight:600}}>{fmt(p.amount)}</p>
+                          {p.metodo_pago && <p style={{fontSize:11,color:"#8892A4",fontWeight:600}}>{p.metodo_pago}</p>}
+                        </div>
+                      </div>
+                      <button onClick={async function(){
+                        if (!p.paid) { setMetodoPagoModal({id:p.id}); setDayModal(null); }
+                        else { await db.update("afip_payments","id=eq."+p.id,{paid:false,metodo_pago:null}); await loadData(); setDayModal(null); }
+                      }} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:8,background:p.paid?"#E8F5E9":"#F4F6FB",color:p.paid?"#27AE60":"#8892A4",fontWeight:700,fontSize:12,border:"1.5px solid "+(p.paid?"#27AE60":"#E5E9F0")}}>
+                        <input type="checkbox" checked={p.paid} readOnly style={{width:14,height:14,accentColor:"#27AE60",cursor:"pointer"}}/>
+                        {p.paid ? "Pagado" : "Marcar pagado"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <button onClick={function(){ setDayModal(null); }} style={{width:"100%",marginTop:20,padding:"11px 0",borderRadius:11,background:"#F4F6FB",color:"#4A5568",fontWeight:800,fontSize:14}}>Cerrar</button>
+          </div>
+        </div>
+      )}
+
+      {metodoPagoModal && (
+        <MetodoPagoModal
+          onClose={function(){ setMetodoPagoModal(null); }}
+          onConfirm={async function(m){
+            await db.update("afip_payments","id=eq."+metodoPagoModal.id,{paid:true,metodo_pago:m});
+            await loadData();
+            setMetodoPagoModal(null);
+          }}
+        />
+      )}
+
+      {modal && (
+        <div onClick={function(){ setModal(null); }} style={{position:"fixed",inset:0,background:"#00000055",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16,backdropFilter:"blur(4px)"}}>
+          <div onClick={function(e){ e.stopPropagation(); }} className="fade-in" style={{background:"#fff",borderRadius:22,padding:30,width:"100%",maxWidth:400,boxShadow:"0 30px 80px #0003"}}>
+            <div style={{width:4,height:32,background:BLUE.main,borderRadius:4,marginBottom:16}}/>
+            <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:20,color:"#1A1D2E",marginBottom:22}}>{modal.editId ? "Editar pago" : "Dia "+modal.day+" — "+MONTHS[month]}</h2>
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              <div>
+                <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:6,textTransform:"uppercase"}}>Concepto</label>
+                <input value={form.name} onChange={function(e){ setForm(function(f){ return Object.assign({},f,{name:e.target.value}); }); }} placeholder="Ej: IVA Abril"
+                  style={{width:"100%",padding:"11px 14px",borderRadius:11,border:"1.5px solid "+BLUE.light,fontSize:14,fontWeight:600}}/>
+              </div>
+              <div>
+                <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:6,textTransform:"uppercase"}}>Monto (ARS)</label>
+                <input value={form.amount} onChange={function(e){ setForm(function(f){ return Object.assign({},f,{amount:e.target.value}); }); }} placeholder="0" type="number"
+                  style={{width:"100%",padding:"11px 14px",borderRadius:11,border:"1.5px solid "+BLUE.light,fontSize:14,fontWeight:600}}/>
+              </div>
+              <div>
+                <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:6,textTransform:"uppercase"}}>Categoria</label>
+                <select value={form.category} onChange={function(e){ setForm(function(f){ return Object.assign({},f,{category:e.target.value}); }); }}
+                  style={{width:"100%",padding:"11px 14px",borderRadius:11,border:"1.5px solid "+BLUE.light,fontSize:14,background:"#fff",fontWeight:600}}>
+                  {AFIP_CATS.map(function(c){ return <option key={c.label} value={c.label}>{c.label}</option>; })}
+                </select>
+              </div>
+              {!modal.editId && (
+                <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",padding:"10px 14px",background:BLUE.soft,borderRadius:11}}>
+                  <input type="checkbox" checked={form.recurring} onChange={function(e){ setForm(function(f){ return Object.assign({},f,{recurring:e.target.checked}); }); }} style={{width:16,height:16,accentColor:BLUE.main}}/>
+                  <span style={{fontSize:13,fontWeight:700,color:"#4A5568",display:"flex",alignItems:"center",gap:6}}><IconRepeat/> Repetir cada mes</span>
+                </label>
+              )}
+              {modal.editId && (
+                <button onClick={async function(){
+                  if (!modal.paid) { setMetodoPagoModal({id:modal.editId}); setModal(null); }
+                  else { await db.update("afip_payments","id=eq."+modal.editId,{paid:false,metodo_pago:null}); await loadData(); setModal(null); }
+                }} style={{padding:"10px 14px",borderRadius:11,background:modal.paid?"#FFF8E1":"#E8F5E9",color:modal.paid?"#E8A838":"#27AE60",fontWeight:800,fontSize:13,textAlign:"left"}}>
+                  {modal.paid ? "Marcar como pendiente" : "Marcar como pagado"}
+                </button>
+              )}
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:24}}>
+              {modal.editId && <button onClick={function(){ deletePayment(modal.editId); }} style={{padding:"11px 16px",borderRadius:11,background:"#FDE8E8",color:"#E85B5B",fontWeight:800,fontSize:13}}>Eliminar</button>}
+              <button onClick={function(){ setModal(null); }} style={{flex:1,padding:"11px 0",borderRadius:11,background:"#F4F6FB",color:"#4A5568",fontWeight:800,fontSize:14}}>Cancelar</button>
+              <button onClick={savePayment} disabled={saving} style={{flex:2,padding:"11px 0",borderRadius:11,background:BLUE.main,color:"#fff",fontWeight:900,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                {saving ? <Spinner color="#fff"/> : (modal.editId ? "Guardar" : "Agregar")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Comprobante Upload Modal ──
+function ComprobanteUploadModal(props) {
+  const [fileUrl, setFileUrl] = useState(null);
+  const [fileName, setFileName] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function uploadFile(file) {
+    setUploading(true);
+    try {
+      const ext = file.name.split(".").pop();
+      const path = "comprobantes/"+Date.now()+"-"+Math.random().toString(36).slice(2)+"."+ext;
+      const res = await fetch(SUPA_URL+"/storage/v1/object/Facturas/"+path, {
+        method:"POST",
+        headers:{ apikey:SUPA_KEY, Authorization:"Bearer "+SUPA_KEY, "Content-Type":file.type, "x-upsert":"true" },
+        body:file,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setFileUrl(SUPA_URL+"/storage/v1/object/public/Facturas/"+path);
+      setFileName(file.name);
+      setError("");
+    } catch(e){ setError("Error al subir. Intentalo de nuevo."); }
+    setUploading(false);
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#00000055",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16,backdropFilter:"blur(4px)"}}>
+      <div className="fade-in" style={{background:"#fff",borderRadius:22,padding:30,width:"100%",maxWidth:400,boxShadow:"0 30px 80px #0003"}}>
+        <div style={{width:4,height:32,background:GREEN.main,borderRadius:4,marginBottom:16}}/>
+        <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:20,color:"#1A1D2E",marginBottom:4}}>Comprobante de transferencia</h2>
+        <p style={{fontSize:13,color:"#8892A4",fontWeight:600,marginBottom:22}}>Adjunta el comprobante para confirmar el pago.</p>
+        <label style={{width:"100%",padding:"14px",borderRadius:11,border:"2px dashed "+GREEN.main+"60",background:GREEN.soft,color:GREEN.main,fontWeight:700,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",gap:8,cursor:"pointer",marginBottom:12}}>
+          {uploading ? <Spinner color={GREEN.main}/> : <span>{fileName || "Subir comprobante (PDF o imagen)"}</span>}
+          <input type="file" accept=".pdf,image/*" onChange={function(e){ if(e.target.files[0]) uploadFile(e.target.files[0]); }} style={{display:"none"}}/>
+        </label>
+        {fileUrl && (
+          <div style={{padding:"10px 14px",borderRadius:10,background:GREEN.light,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:13,fontWeight:600,color:GREEN.main}}>{fileName}</span>
+            <span style={{fontSize:11,color:"#27AE60",marginLeft:"auto",fontWeight:700}}>Listo</span>
+          </div>
+        )}
+        {error && <p style={{fontSize:12,color:"#E85B5B",fontWeight:700,marginBottom:12}}>{error}</p>}
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={props.onClose} style={{flex:1,padding:"11px 0",borderRadius:11,background:"#F4F6FB",color:"#4A5568",fontWeight:800,fontSize:14}}>Cancelar</button>
+          <button onClick={function(){ if(!fileUrl){setError("Debes subir el comprobante antes de confirmar.");return;} props.onConfirm(fileUrl); }}
+            style={{flex:2,padding:"11px 0",borderRadius:11,background:fileUrl?GREEN.main:"#CDD0DA",color:"#fff",fontWeight:900,fontSize:14,cursor:fileUrl?"pointer":"not-allowed"}}>
+            Confirmar pago
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Proveedores Detalle ──
+function ProveedoresDetalle(props) {
+  const [expanded, setExpanded] = useState({});
+  const [editing, setEditing] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState({name:"",banco:"",cbu:"",alias:"",cuit:"",email:""});
+  const [addError, setAddError] = useState("");
+
+  const fields = [{key:"banco",label:"Banco"},{key:"cbu",label:"CBU"},{key:"alias",label:"Alias"},{key:"cuit",label:"CUIT/CUIL"},{key:"email",label:"Email"}];
+
+  async function addSupplier() {
+    if (!addForm.name.trim()) { setAddError("El nombre es obligatorio."); return; }
+    if (!addForm.banco.trim()||!addForm.cbu.trim()||!addForm.alias.trim()||!addForm.cuit.trim()||!addForm.email.trim()) {
+      setAddError("Todos los campos son obligatorios."); return;
+    }
+    setSaving(true);
+    try {
+      await db.insert("prov_suppliers", addForm);
+      await props.loadData();
+      setShowAdd(false);
+      setAddForm({name:"",banco:"",cbu:"",alias:"",cuit:"",email:""});
+      setAddError("");
+    } catch(e){ console.error(e); }
+    setSaving(false);
+  }
+
+  async function saveEdit(id) {
+    setSaving(true);
+    try { await db.update("prov_suppliers","id=eq."+id,editForm); await props.loadData(); setEditing(null); } catch(e){ console.error(e); }
+    setSaving(false);
+  }
+
+  return (
+    <div style={{background:"#fff",borderRadius:16,padding:24,boxShadow:"0 1px 3px #0001"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <div>
+          <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:18,color:"#1A1D2E",marginBottom:2}}>Proveedores</h2>
+          <p style={{fontSize:13,color:"#8892A4",fontWeight:600}}>Datos bancarios y de contacto.</p>
+        </div>
+        <button onClick={function(){ setShowAdd(true); }} style={{padding:"10px 18px",borderRadius:11,background:GREEN.main,color:"#fff",fontWeight:800,fontSize:13}}>+ Nuevo proveedor</button>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {props.suppliers.map(function(s){
+          var info = getAlert ? null : null;
+          return (
+            <div key={s.id} style={{borderRadius:12,overflow:"hidden",border:"1.5px solid "+GREEN.main+"20"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:GREEN.light,cursor:"pointer"}}
+                onClick={function(){ setExpanded(function(prev){ var n=Object.assign({},prev); n[s.id]=!n[s.id]; return n; }); }}>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{width:36,height:36,borderRadius:10,background:GREEN.main,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:900,fontSize:14}}>{s.name[0]}</div>
+                  <div>
+                    <p style={{fontWeight:800,fontSize:14,color:"#1A1D2E"}}>{s.name}</p>
+                    {s.banco && <p style={{fontSize:11,color:"#8892A4",fontWeight:600}}>{s.banco}</p>}
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:20,color:GREEN.main,fontWeight:900,lineHeight:1}}>{expanded[s.id]?"−":"+"}</span>
+                  <button onClick={function(e){ e.stopPropagation(); if(window.confirm("Seguro que queres eliminar a "+s.name+"?")){ db.delete("prov_suppliers","id=eq."+s.id).then(props.loadData); }}}
+                    style={{width:28,height:28,borderRadius:8,background:"#FFE8E8",color:"#E85B5B",fontWeight:900,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+                </div>
+              </div>
+              {expanded[s.id] && (
+                <div style={{padding:16,background:"#fff"}}>
+                  {editing===s.id ? (
+                    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                      {fields.map(function(f){ return (
+                        <div key={f.key}>
+                          <label style={{fontSize:10,fontWeight:800,color:"#8892A4",display:"block",marginBottom:4,textTransform:"uppercase"}}>{f.label}</label>
+                          <input value={editForm[f.key]||""} onChange={function(e){ var v=e.target.value; setEditForm(function(prev){ var n=Object.assign({},prev); n[f.key]=v; return n; }); }}
+                            style={{width:"100%",padding:"9px 12px",borderRadius:9,border:"1.5px solid "+GREEN.light,fontSize:13,fontWeight:600}}/>
+                        </div>
+                      ); })}
+                      <div style={{display:"flex",gap:8}}>
+                        <button onClick={function(){ setEditing(null); }} style={{flex:1,padding:"9px 0",borderRadius:9,background:"#F4F6FB",color:"#4A5568",fontWeight:800,fontSize:13}}>Cancelar</button>
+                        <button onClick={function(){ saveEdit(s.id); }} disabled={saving} style={{flex:2,padding:"9px 0",borderRadius:9,background:GREEN.main,color:"#fff",fontWeight:800,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                          {saving?<Spinner color="#fff"/>:"Guardar"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                        {fields.map(function(f){ return (
+                          <div key={f.key} style={{padding:"8px 12px",borderRadius:9,background:"#F9FAFB",border:"1px solid #F0F2F8"}}>
+                            <p style={{fontSize:10,fontWeight:800,color:"#8892A4",textTransform:"uppercase",marginBottom:2}}>{f.label}</p>
+                            <p style={{fontSize:13,fontWeight:700,color:s[f.key]?"#1A1D2E":"#CDD0DA"}}>{s[f.key]||"—"}</p>
+                          </div>
+                        ); })}
+                      </div>
+                      <button onClick={function(){ setEditing(s.id); setEditForm({cbu:s.cbu||"",alias:s.alias||"",cuit:s.cuit||"",email:s.email||"",banco:s.banco||""}); }}
+                        style={{width:"100%",padding:"9px 0",borderRadius:9,background:GREEN.light,color:GREEN.main,fontWeight:800,fontSize:13}}>
+                        Editar datos
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {showAdd && (
+        <div onClick={function(){ setShowAdd(false); }} style={{position:"fixed",inset:0,background:"#00000055",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:16,backdropFilter:"blur(4px)"}}>
+          <div onClick={function(e){ e.stopPropagation(); }} className="fade-in" style={{background:"#fff",borderRadius:22,padding:30,width:"100%",maxWidth:440,boxShadow:"0 30px 80px #0003",maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{width:4,height:32,background:GREEN.main,borderRadius:4,marginBottom:16}}/>
+            <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:20,color:"#1A1D2E",marginBottom:4}}>Nuevo proveedor</h2>
+            <p style={{fontSize:13,color:"#8892A4",fontWeight:600,marginBottom:22}}>Todos los campos son obligatorios.</p>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div>
+                <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:6,textTransform:"uppercase"}}>Nombre</label>
+                <input value={addForm.name} onChange={function(e){ var v=e.target.value; setAddForm(function(f){ return Object.assign({},f,{name:v}); }); }} placeholder="Nombre del proveedor"
+                  style={{width:"100%",padding:"11px 14px",borderRadius:11,border:"1.5px solid "+GREEN.light,fontSize:14,fontWeight:600}}/>
+              </div>
+              {fields.map(function(f){ return (
+                <div key={f.key}>
+                  <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:6,textTransform:"uppercase"}}>{f.label}</label>
+                  <input value={addForm[f.key]} onChange={function(e){ var v=e.target.value; setAddForm(function(prev){ var n=Object.assign({},prev); n[f.key]=v; return n; }); }}
+                    placeholder={"Ingresar "+f.label.toLowerCase()} style={{width:"100%",padding:"11px 14px",borderRadius:11,border:"1.5px solid "+GREEN.light,fontSize:14,fontWeight:600}}/>
+                </div>
+              ); })}
+              {addError && <p style={{fontSize:12,color:"#E85B5B",fontWeight:700}}>{addError}</p>}
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:24}}>
+              <button onClick={function(){ setShowAdd(false); setAddError(""); }} style={{flex:1,padding:"11px 0",borderRadius:11,background:"#F4F6FB",color:"#4A5568",fontWeight:800,fontSize:14}}>Cancelar</button>
+              <button onClick={addSupplier} disabled={saving} style={{flex:2,padding:"11px 0",borderRadius:11,background:GREEN.main,color:"#fff",fontWeight:900,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                {saving?<Spinner color="#fff"/>:"Guardar proveedor"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Registro de Pagos (Proveedores Historial) ──
+function RegistroPagos() {
+  const [facturas, setFacturas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterSupplier, setFilterSupplier] = useState("Todos");
+  const [filterStatus, setFilterStatus] = useState("Todos");
+  const [suppliers, setSuppliers] = useState([]);
+  const [viewFile, setViewFile] = useState(null);
+  const [viewFileLabel, setViewFileLabel] = useState("Archivo");
+
+  useEffect(function(){
+    async function load() {
+      setLoading(true);
+      try {
+        const [pays, sups] = await Promise.all([
+          db.get("prov_payments","order=month_key.desc,day.desc"),
+          db.get("prov_suppliers","order=name.asc"),
+        ]);
+        setFacturas(pays); setSuppliers(sups);
+      } catch(e){ console.error(e); }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const filtered = facturas.filter(function(f){
+    if (filterSupplier !== "Todos" && f.supplier !== filterSupplier) return false;
+    if (filterStatus === "Pagado" && !f.paid) return false;
+    if (filterStatus === "Impago" && f.paid) return false;
+    return true;
+  });
+
+  function fmtDate(mk, day) {
+    var parts = mk.split("-").map(Number);
+    return String(day).padStart(2,"0")+"/"+String(parts[1]+1).padStart(2,"0")+"/"+parts[0];
+  }
+
+  return (
+    <div className="fade-in">
+      <div style={{background:"#fff",borderRadius:16,padding:24,boxShadow:"0 1px 3px #0001"}}>
+        <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:18,color:"#1A1D2E",marginBottom:4}}>Registro de Pagos</h2>
+        <p style={{fontSize:13,color:"#8892A4",fontWeight:600,marginBottom:20}}>Historial completo de pagos a proveedores.</p>
+        <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
+          <select value={filterSupplier} onChange={function(e){ setFilterSupplier(e.target.value); }}
+            style={{padding:"8px 12px",borderRadius:10,border:"1.5px solid "+GREEN.light,fontSize:13,fontWeight:600,background:"#fff"}}>
+            <option value="Todos">Todos los proveedores</option>
+            {suppliers.map(function(s){ return <option key={s.id} value={s.name}>{s.name}</option>; })}
+          </select>
+          <select value={filterStatus} onChange={function(e){ setFilterStatus(e.target.value); }}
+            style={{padding:"8px 12px",borderRadius:10,border:"1.5px solid "+GREEN.light,fontSize:13,fontWeight:600,background:"#fff"}}>
+            <option value="Todos">Todos los estados</option>
+            <option value="Pagado">Pagado</option>
+            <option value="Impago">Impago</option>
+          </select>
+          <span style={{fontSize:13,fontWeight:600,color:"#8892A4"}}>{filtered.length} resultado{filtered.length!==1?"s":""}</span>
+        </div>
+        {loading ? <div style={{display:"flex",justifyContent:"center",padding:40}}><Spinner color={GREEN.main}/></div> : filtered.length===0 ? (
+          <div style={{textAlign:"center",padding:"40px 0",color:"#B0B8C8"}}><p style={{fontSize:14,fontWeight:600}}>No se encontraron pagos.</p></div>
+        ) : (
+          <>
+            <div style={{display:"grid",gridTemplateColumns:"100px 1fr 110px 90px 44px 44px",gap:10,padding:"8px 14px",marginBottom:4}}>
+              {["Fecha","Proveedor","Monto","Estado","Fac.","Comp."].map(function(h){ return <span key={h} style={{fontSize:11,fontWeight:800,color:"#8892A4",textTransform:"uppercase"}}>{h}</span>; })}
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              {filtered.map(function(f){
+                return (
+                  <div key={f.id} style={{display:"grid",gridTemplateColumns:"100px 1fr 110px 90px 44px 44px",gap:10,padding:"12px 14px",borderRadius:12,background:f.paid?"#F9FAFB":GREEN.light,alignItems:"center"}}>
+                    <span style={{fontSize:12,fontWeight:600,color:"#4A5568"}}>{fmtDate(f.month_key,f.day)}</span>
+                    <div style={{display:"flex",alignItems:"center",gap:8,overflow:"hidden"}}>
+                      <div style={{width:28,height:28,borderRadius:8,background:GREEN.main,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:900,fontSize:12,flexShrink:0}}>{(f.supplier||"?")[0]}</div>
+                      <span style={{fontSize:13,fontWeight:700,color:"#1A1D2E",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.supplier}</span>
+                    </div>
+                    <span style={{fontSize:14,fontWeight:900,color:"#1A1D2E"}}>{fmt(f.amount)}</span>
+                    <div style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:20,background:f.paid?"#E4F9ED":"#FDE8E8"}}>
+                      <div style={{width:6,height:6,borderRadius:"50%",background:f.paid?"#27AE60":"#E85B5B",flexShrink:0}}/>
+                      <span style={{fontSize:11,fontWeight:800,color:f.paid?"#27AE60":"#E85B5B",whiteSpace:"nowrap"}}>{f.paid?"Pagado":"Impago"}</span>
+                    </div>
+                    {f.file_url ? (
+                      <button onClick={function(){ setViewFile(f.file_url); setViewFileLabel("Factura"); }} title="Ver factura"
+                        style={{width:32,height:32,borderRadius:8,background:GREEN.light,color:GREEN.main,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>📄</button>
+                    ) : <div/>}
+                    {f.comprobante_url ? (
+                      <button onClick={function(){ setViewFile(f.comprobante_url); setViewFileLabel("Comprobante de transferencia"); }} title="Ver comprobante"
+                        style={{width:32,height:32,borderRadius:8,background:"#E8F5E9",color:"#27AE60",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>🧾</button>
+                    ) : <div/>}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+      {viewFile && (
+        <div onClick={function(){ setViewFile(null); }} style={{position:"fixed",inset:0,background:"#000000BB",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:24}}>
+          <div onClick={function(e){ e.stopPropagation(); }} style={{background:"#fff",borderRadius:16,overflow:"hidden",maxWidth:700,width:"100%",maxHeight:"90vh",display:"flex",flexDirection:"column"}}>
+            <div style={{padding:"12px 16px",borderBottom:"1px solid #F0F2F8",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontWeight:700,fontSize:14,color:"#1A1D2E"}}>{viewFileLabel}</span>
+              <button onClick={function(){ setViewFile(null); }} style={{width:28,height:28,borderRadius:8,background:"#F4F6FB",color:"#4A5568",fontWeight:900,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+            </div>
+            <div style={{flex:1,overflow:"auto"}}>
+              {/\.(jpg|jpeg|png|gif|webp)$/i.test(viewFile) ? (
+                <img src={viewFile} alt="archivo" style={{width:"100%",display:"block"}}/>
+              ) : (
+                <iframe src={viewFile} style={{width:"100%",height:"70vh",border:"none"}} title="archivo"/>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Proveedores Calendar ──
+function ProveedoresCalendar() {
+  const now = new Date();
+  const [year,setYear]   = useState(now.getFullYear());
+  const [month,setMonth] = useState(now.getMonth());
+  const [payments,setPayments] = useState([]);
+  const [suppliers,setSuppliers] = useState([]);
+  const [subTab,setSubTab] = useState("calendar");
+  const [modal,setModal]   = useState(null);
+  const [form,setForm]     = useState({supplier:"",amount:"",fileUrl:null,fileName:""});
+  const [loading,setLoading] = useState(true);
+  const [saving,setSaving]   = useState(false);
+  const [uploading,setUploading] = useState(false);
+  const [viewFile,setViewFile] = useState(null);
+  const [comprobanteModal,setComprobanteModal] = useState(null);
+
+  const mk = year + "-" + month;
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [pays,sups] = await Promise.all([
+        db.get("prov_payments","month_key=eq."+mk+"&order=day.asc"),
+        db.get("prov_suppliers","order=name.asc"),
+      ]);
+      setPayments(pays); setSuppliers(sups);
+    } catch(e){ console.error(e); }
+    setLoading(false);
+  }
+
+  useEffect(function(){ loadData(); }, [mk]);
+
+  async function uploadFile(file) {
+    setUploading(true);
+    try {
+      const ext = file.name.split(".").pop();
+      const path = Date.now()+"-"+Math.random().toString(36).slice(2)+"."+ext;
+      const res = await fetch(SUPA_URL+"/storage/v1/object/Facturas/"+path, {
+        method:"POST",
+        headers:{ apikey:SUPA_KEY, Authorization:"Bearer "+SUPA_KEY, "Content-Type":file.type, "x-upsert":"true" },
+        body:file,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const url = SUPA_URL+"/storage/v1/object/public/Facturas/"+path;
+      setForm(function(f){ return Object.assign({},f,{fileUrl:url, fileName:file.name}); });
+    } catch(e){ console.error(e); alert("Error al subir: "+e.message); }
+    setUploading(false);
+  }
+
+  async function savePayment() {
+    if (!form.supplier.trim()||!form.amount) return;
+    const amount = parseFloat(String(form.amount).replace(/[^0-9.]/g,""));
+    if (isNaN(amount)) return;
+    setSaving(true);
+    try {
+      if (modal.editId) {
+        var upd = {supplier:form.supplier,amount};
+        if (form.fileUrl) upd.file_url = form.fileUrl;
+        await db.update("prov_payments","id=eq."+modal.editId,upd);
+      } else {
+        await db.insert("prov_payments",{month_key:mk,day:modal.day,supplier:form.supplier,amount,paid:false,file_url:form.fileUrl||null});
+        if (!suppliers.find(function(s){ return s.name===form.supplier.trim(); })) await db.insert("prov_suppliers",{name:form.supplier.trim()});
+      }
+      await loadData();
+    } catch(e){ console.error(e); }
+    setSaving(false);
+    setModal(null);
+  }
+
+  async function deletePayment(id) {
+    setSaving(true);
+    await db.delete("prov_payments","id=eq."+id);
+    await loadData();
+    setSaving(false);
+    setModal(null);
+  }
+
+  async function togglePaid(id, paid, e) {
+    e.stopPropagation();
+    if (!paid) {
+      var p = payments.find(function(x){ return x.id===id; });
+      if (!p || !p.file_url) { setComprobanteModal({id:id}); return; }
+    }
+    await db.update("prov_payments","id=eq."+id,{paid:!paid});
+    setPayments(function(prev){ return prev.map(function(p){ return p.id===id ? Object.assign({},p,{paid:!paid}) : p; }); });
+  }
+
+  const byDay = {};
+  payments.forEach(function(p){ if(!byDay[p.day]) byDay[p.day]=[]; byDay[p.day].push(p); });
+  const totalDays = daysInMonth(year,month), startOffset = firstDay(year,month);
+  const grid = [];
+  for(var i=0;i<startOffset;i++) grid.push(null);
+  for(var d=1;d<=totalDays;d++) grid.push(d);
+  while(grid.length%7!==0) grid.push(null);
+  const today = now.getDate(), isCurr = year===now.getFullYear()&&month===now.getMonth();
+
+  return (
+    <div className="fade-in">
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+        {[["calendar","Calendario",<IconCalendar/>],["suppliers","Proveedores",<IconTruck/>],["historial","Registro de Pagos",<IconDoc/>]].map(function(item){
+          var t=item[0], label=item[1], icon=item[2];
+          return (
+            <button key={t} onClick={function(){ setSubTab(t); }} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 16px",borderRadius:10,fontSize:13,fontWeight:700,background:subTab===t?GREEN.main:"#fff",color:subTab===t?"#fff":"#8892A4",boxShadow:subTab===t?"0 4px 12px "+GREEN.main+"30":"0 1px 3px #0001"}}>
+              {icon}{label}
+            </button>
+          );
+        })}
+      </div>
+
+      {subTab==="calendar" && (<>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fff",borderRadius:16,padding:"14px 22px",marginBottom:14,boxShadow:"0 1px 3px #0001"}}>
+          <button onClick={function(){ if(month===0){setMonth(11);setYear(function(y){return y-1;});}else setMonth(function(m){return m-1;}); }} style={{width:38,height:38,borderRadius:10,background:GREEN.light,color:GREEN.main,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800}}>‹</button>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <span style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:22,color:"#1A1D2E"}}>{MONTHS[month]} {year}</span>
+            <button onClick={loadData} title="Actualizar" style={{width:32,height:32,borderRadius:9,background:GREEN.light,color:GREEN.main,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>↻</button>
+          </div>
+          <button onClick={function(){ if(month===11){setMonth(0);setYear(function(y){return y+1;});}else setMonth(function(m){return m+1;}); }} style={{width:38,height:38,borderRadius:10,background:GREEN.light,color:GREEN.main,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800}}>›</button>
+        </div>
+        {loading ? <div style={{display:"flex",justifyContent:"center",padding:60}}><Spinner color={GREEN.main}/></div> : (
+          <div style={{background:"#fff",borderRadius:16,overflow:"hidden",boxShadow:"0 1px 3px #0001"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",background:"#F4F6FB"}}>
+              {DAYS_SHORT.map(function(d){ return <div key={d} style={{textAlign:"center",padding:"11px 4px",fontSize:11,fontWeight:800,color:"#8892A4",textTransform:"uppercase"}}>{d}</div>; })}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gridAutoRows:"170px"}}>
+              {grid.map(function(day,i){
+                if(!day) return <div key={"e"+i} style={{borderRight:"1px solid #F0F2F8",borderBottom:"1px solid #F0F2F8",background:"#FAFBFC"}}/>;
+                const dp = byDay[day]||[], isToday = isCurr&&day===today;
+                return (
+                  <div key={day} onClick={function(){ setForm({supplier:"",amount:"",fileUrl:null,fileName:""}); setModal({day:day}); }}
+                    style={{borderRight:"1px solid #F0F2F8",borderBottom:"1px solid #F0F2F8",padding:"7px 5px",cursor:"pointer",background:isToday?GREEN.soft:"#fff",overflow:"hidden"}}
+                    onMouseEnter={function(e){ e.currentTarget.style.background=isToday?GREEN.soft:GREEN.hover; }}
+                    onMouseLeave={function(e){ e.currentTarget.style.background=isToday?GREEN.soft:"#fff"; }}>
+                    <span style={{width:24,height:24,borderRadius:"50%",fontSize:12,fontWeight:800,background:isToday?GREEN.main:"transparent",color:isToday?"#fff":"#1A1D2E",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:4}}>{day}</span>
+                    <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                      {dp.map(function(p){
+                        return (
+                          <div key={p.id} className="chip" onClick={function(e){ e.stopPropagation(); setForm({supplier:p.supplier,amount:String(p.amount),fileUrl:null,fileName:p.file_url?p.file_url.split("/").pop():""}); setModal({day:p.day,editId:p.id,paid:p.paid,fileUrl:p.file_url,fileName:p.file_url?p.file_url.split("/").pop():""}); }}
+                            style={{background:p.paid?"#F4F6FB":GREEN.light,borderLeft:"3px solid "+(p.paid?"#D0D5E0":GREEN.main),borderRadius:"0 6px 6px 0",padding:"3px 5px",opacity:p.paid?0.55:1}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                              <span style={{fontSize:10,fontWeight:800,color:p.paid?"#8892A4":GREEN.main,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:64}}>{p.supplier}</span>
+                              <input type="checkbox" checked={p.paid} onChange={function(){}} onClick={function(e){ togglePaid(p.id,p.paid,e); }} style={{width:13,height:13,accentColor:GREEN.main,cursor:"pointer",flexShrink:0}}/>
+                            </div>
+                            <p style={{fontSize:10,fontWeight:900,color:p.paid?"#8892A4":"#1A1D2E",marginTop:1}}>{fmt(p.amount)}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </>)}
+
+      {subTab==="suppliers" && <ProveedoresDetalle suppliers={suppliers} loadData={loadData}/>}
+      {subTab==="historial" && <RegistroPagos/>}
+
+      {comprobanteModal && (
+        <ComprobanteUploadModal
+          onClose={function(){ setComprobanteModal(null); }}
+          onConfirm={async function(url){
+            await db.update("prov_payments","id=eq."+comprobanteModal.id,{paid:true,comprobante_url:url});
+            setPayments(function(prev){ return prev.map(function(p){ return p.id===comprobanteModal.id ? Object.assign({},p,{paid:true,comprobante_url:url}) : p; }); });
+            setComprobanteModal(null);
+          }}
+        />
+      )}
+
+      {modal && (
+        <div onClick={function(){ setModal(null); }} style={{position:"fixed",inset:0,background:"#00000055",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16,backdropFilter:"blur(4px)"}}>
+          <div onClick={function(e){ e.stopPropagation(); }} className="fade-in" style={{background:"#fff",borderRadius:22,padding:30,width:"100%",maxWidth:420,boxShadow:"0 30px 80px #0003",maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{width:4,height:32,background:GREEN.main,borderRadius:4,marginBottom:16}}/>
+            <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:20,color:"#1A1D2E",marginBottom:4}}>{modal.editId?"Editar pago":"Dia "+modal.day+" — "+MONTHS[month]}</h2>
+            <p style={{fontSize:13,color:"#8892A4",fontWeight:600,marginBottom:22}}>Pago a proveedor</p>
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              <div>
+                <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:6,textTransform:"uppercase"}}>Proveedor</label>
+                {suppliers.length > 0 ? (
+                  <select value={form.supplier} onChange={function(e){ var v=e.target.value; setForm(function(f){ return Object.assign({},f,{supplier:v}); }); }}
+                    style={{width:"100%",padding:"11px 14px",borderRadius:11,border:"1.5px solid "+GREEN.light,fontSize:14,background:"#fff",fontWeight:600}}>
+                    <option value="">— Selecciona —</option>
+                    {suppliers.map(function(s){ return <option key={s.id} value={s.name}>{s.name}</option>; })}
+                  </select>
+                ) : (
+                  <input value={form.supplier} onChange={function(e){ var v=e.target.value; setForm(function(f){ return Object.assign({},f,{supplier:v}); }); }} placeholder="Nombre del proveedor"
+                    style={{width:"100%",padding:"11px 14px",borderRadius:11,border:"1.5px solid "+GREEN.light,fontSize:14,fontWeight:600}}/>
+                )}
+              </div>
+              <div>
+                <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:6,textTransform:"uppercase"}}>Monto (ARS)</label>
+                <input value={form.amount} onChange={function(e){ var v=e.target.value; setForm(function(f){ return Object.assign({},f,{amount:v}); }); }} placeholder="0" type="number"
+                  style={{width:"100%",padding:"11px 14px",borderRadius:11,border:"1.5px solid "+GREEN.light,fontSize:14,fontWeight:600}}/>
+              </div>
+              <div>
+                <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:6,textTransform:"uppercase"}}>Factura (PDF o imagen)</label>
+                <label style={{width:"100%",padding:"11px 14px",borderRadius:11,border:"2px dashed "+GREEN.main+"60",background:GREEN.soft,color:GREEN.main,fontWeight:700,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",gap:8,cursor:"pointer"}}>
+                  {uploading ? <Spinner color={GREEN.main}/> : <span>{form.fileName || modal.fileName || "Subir factura"}</span>}
+                  <input type="file" accept=".pdf,image/*" onChange={function(e){ if(e.target.files[0]) uploadFile(e.target.files[0]); }} style={{display:"none"}}/>
+                </label>
+                {(form.fileUrl||modal.fileUrl) && (
+                  <button onClick={function(){ setViewFile(form.fileUrl||modal.fileUrl); }}
+                    style={{marginTop:8,width:"100%",padding:"8px 14px",borderRadius:10,background:GREEN.light,color:GREEN.main,fontWeight:700,fontSize:13,display:"flex",alignItems:"center",gap:8}}>
+                    Ver factura adjunta
+                  </button>
+                )}
+              </div>
+              {modal.editId && (
+                <button onClick={function(){
+                  if (!modal.paid) { setComprobanteModal({id:modal.editId}); setModal(null); }
+                  else { db.update("prov_payments","id=eq."+modal.editId,{paid:false}).then(function(){ loadData(); setModal(null); }); }
+                }} style={{padding:"10px 14px",borderRadius:11,background:modal.paid?"#FFF8E1":"#E8F5E9",color:modal.paid?"#E8A838":"#27AE60",fontWeight:800,fontSize:13,textAlign:"left"}}>
+                  {modal.paid ? "Marcar como pendiente" : "Marcar como pagado"}
+                </button>
+              )}
+            </div>
+            <div style={{display:"flex",gap:10,marginTop:24}}>
+              {modal.editId && <button onClick={function(){ deletePayment(modal.editId); }} style={{padding:"11px 16px",borderRadius:11,background:"#FDE8E8",color:"#E85B5B",fontWeight:800,fontSize:13}}>Eliminar</button>}
+              <button onClick={function(){ setModal(null); }} style={{flex:1,padding:"11px 0",borderRadius:11,background:"#F4F6FB",color:"#4A5568",fontWeight:800,fontSize:14}}>Cancelar</button>
+              <button onClick={savePayment} disabled={saving||uploading} style={{flex:2,padding:"11px 0",borderRadius:11,background:GREEN.main,color:"#fff",fontWeight:900,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                {saving?<Spinner color="#fff"/>:(modal.editId?"Guardar":"Agregar")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewFile && (
+        <div onClick={function(){ setViewFile(null); }} style={{position:"fixed",inset:0,background:"#000000BB",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:24}}>
+          <div onClick={function(e){ e.stopPropagation(); }} style={{background:"#fff",borderRadius:16,overflow:"hidden",maxWidth:700,width:"100%",maxHeight:"90vh",display:"flex",flexDirection:"column"}}>
+            <div style={{padding:"12px 16px",borderBottom:"1px solid #F0F2F8",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontWeight:700,fontSize:14,color:"#1A1D2E"}}>Factura</span>
+              <button onClick={function(){ setViewFile(null); }} style={{width:28,height:28,borderRadius:8,background:"#F4F6FB",color:"#4A5568",fontWeight:900,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+            </div>
+            <div style={{flex:1,overflow:"auto"}}>
+              {/\.(jpg|jpeg|png|gif|webp)$/i.test(viewFile) ? (
+                <img src={viewFile} alt="factura" style={{width:"100%",display:"block"}}/>
+              ) : (
+                <iframe src={viewFile} style={{width:"100%",height:"70vh",border:"none"}} title="factura"/>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main App ──
+function App() {
+  const [loggedIn, setLoggedIn] = useState(function(){ return sessionStorage.getItem("poster-auth")==="1"; });
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [mainTab, setMainTab] = useState("afip");
+
+  function handleLogin() {
+    sessionStorage.setItem("poster-auth","1");
+    setLoggedIn(true);
+    setShowWelcome(true);
+  }
+
+  if (!loggedIn) return <LoginScreen onLogin={handleLogin}/>;
+
+  return (
+    <div style={{minHeight:"100vh",background:"#F4F6FB"}}>
+      {showWelcome && <WelcomePopup onClose={function(){ setShowWelcome(false); }}/>}
+      <div style={{maxWidth:1200,margin:"0 auto",padding:"28px 16px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24,flexWrap:"wrap",gap:12}}>
+          <PosterLogo width={160}/>
+          <div style={{display:"flex",gap:2,background:"#fff",borderRadius:14,padding:4,boxShadow:"0 1px 3px #0001"}}>
+            <button onClick={function(){ setMainTab("afip"); }} style={{display:"flex",alignItems:"center",gap:7,padding:"10px 20px",borderRadius:11,fontSize:13,fontWeight:800,background:mainTab==="afip"?BLUE.main:"transparent",color:mainTab==="afip"?"#fff":"#8892A4",boxShadow:mainTab==="afip"?"0 4px 12px "+BLUE.main+"40":"none",transition:"all 0.2s"}}>
+              <IconCalendar/> Impuestos
+            </button>
+            <button onClick={function(){ setMainTab("prov"); }} style={{display:"flex",alignItems:"center",gap:7,padding:"10px 20px",borderRadius:11,fontSize:13,fontWeight:800,background:mainTab==="prov"?GREEN.main:"transparent",color:mainTab==="prov"?"#fff":"#8892A4",boxShadow:mainTab==="prov"?"0 4px 12px "+GREEN.main+"40":"none",transition:"all 0.2s"}}>
+              <IconTruck/> Proveedores
+            </button>
+          </div>
+        </div>
+        <div style={{height:4,borderRadius:4,background:mainTab==="afip"?BLUE.main:GREEN.main,marginBottom:20,transition:"background 0.3s"}}/>
+        {mainTab==="afip" ? <AfipCalendar/> : <ProveedoresCalendar/>}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
