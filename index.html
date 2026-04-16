@@ -480,12 +480,7 @@ function AfipCalendar() {
                         <p style={{fontSize:13,color:p.paid?"#8892A4":cat.color,fontWeight:600}}>{fmt(p.amount)}</p>
                         {p.metodo_pago&&<p style={{fontSize:11,color:"#8892A4"}}>{p.metodo_pago}</p>}
                       </div>
-                      <button onClick={async function(){
-                        if(!p.paid){ setMetodoPagoModal({id:p.id}); setDayModal(null); }
-                        else{ await db.update("afip_payments","id=eq."+p.id,{paid:false,metodo_pago:null}); cDel("afip:"+mk); await loadData(); setDayModal(null); }
-                      }} style={{padding:"7px 14px",borderRadius:9,background:p.paid?"#F4F6FB":"#E4F9ED",color:p.paid?"#8892A4":"#27AE60",fontWeight:700,fontSize:13,border:"1.5px solid "+(p.paid?"#E5E9F0":"#27AE6030")}}>
-                        {p.paid?"Desmarcar":"Marcar pagado"}
-                      </button>
+                      {p.paid && <span style={{fontSize:12,fontWeight:700,color:"#27AE60",background:"#E4F9ED",padding:"5px 11px",borderRadius:20}}>Pagado</span>}
                     </div>
                   );
                 })}
@@ -679,10 +674,16 @@ function ProveedoresCalendar() {
                         ):(
                           <button onClick={function(e){ togglePaid(p.id,false,e); }} style={{padding:"7px 14px",borderRadius:9,background:GREEN.main,color:"#fff",fontWeight:700,fontSize:13}}>Marcar pagado</button>
                         )}
-                        {(p.file_url||p.comprobante_url)&&(
-                          <button onClick={function(){ window.open(p.file_url||p.comprobante_url,"_blank"); }}
+                        {!p.paid && p.file_url && (
+                          <button onClick={function(){ window.open(p.file_url,"_blank"); }}
                             style={{padding:"6px 12px",borderRadius:9,background:"#F4F6FB",color:"#4A5568",fontWeight:700,fontSize:12,border:"1.5px solid #E5E9F0"}}>
                             Ver factura
+                          </button>
+                        )}
+                        {p.paid && p.comprobante_url && (
+                          <button onClick={function(){ window.open(p.comprobante_url,"_blank"); }}
+                            style={{padding:"6px 12px",borderRadius:9,background:"#E4F9ED",color:"#27AE60",fontWeight:700,fontSize:12,border:"1.5px solid #27AE6030"}}>
+                            Ver comprobante
                           </button>
                         )}
                         <button onClick={function(){ setForm({supplier:p.supplier,amount:String(p.amount),fileUrl:null,fileName:p.file_url?p.file_url.split("/").pop():""}); setModal({day:p.day,editId:p.id,paid:p.paid,fileUrl:p.file_url}); }}
@@ -777,7 +778,7 @@ function ProveedoresCalendar() {
       {modal&&!modal.isNewSup&&(
         <div onClick={function(){ setModal(null); }} style={{position:"fixed",inset:0,background:"#00000055",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16,backdropFilter:"blur(4px)"}}>
           <div onClick={function(e){ e.stopPropagation(); }} className="fade-in" style={{background:"#fff",borderRadius:22,padding:28,width:"100%",maxWidth:400,boxShadow:"0 30px 80px #0003",maxHeight:"90vh",overflowY:"auto"}}>
-            <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:19,color:"#1A1D2E",marginBottom:18}}>{modal.editId?"Modificar — "+MONTHS[month]+" dia "+modal.day:"Nuevo pago — "+MONTHS[month]+" "+modal.day}</h2>
+            <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:19,color:"#1A1D2E",marginBottom:18}}>{modal.editId?(modal.day+" de "+MONTHS[month]):(modal.day+" de "+MONTHS[month])}</h2>
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
               <div>
                 <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:5,textTransform:"uppercase"}}>Proveedor</label>
@@ -795,20 +796,11 @@ function ProveedoresCalendar() {
                 <input value={form.amount} onChange={function(e){ var v=e.target.value; setForm(function(f){ return Object.assign({},f,{amount:v}); }); }} placeholder="0" type="number" style={{width:"100%",padding:"11px 14px",borderRadius:11,border:"1.5px solid "+GREEN.light,fontSize:14,fontWeight:600}}/>
               </div>
               <div>
-                <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:5,textTransform:"uppercase"}}>Factura (opcional)</label>
                 <label style={{width:"100%",padding:"11px 14px",borderRadius:11,border:"2px dashed "+GREEN.main+"60",background:GREEN.soft,color:GREEN.main,fontWeight:700,fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",gap:8,cursor:"pointer"}}>
                   {uploading?<Spinner color={GREEN.main}/>:<span>{form.fileName||"Subir factura"}</span>}
                   <input type="file" accept=".pdf,image/*" onChange={function(e){ if(e.target.files[0]) uploadFile(e.target.files[0]); }} style={{display:"none"}}/>
                 </label>
               </div>
-              {modal.editId&&(
-                <button onClick={function(){
-                  if(!modal.paid){ setComprobanteModal({id:modal.editId}); setModal(null); }
-                  else{ db.update("prov_payments","id=eq."+modal.editId,{paid:false}).then(function(){ cDel("prov:"+mk); loadData(); setModal(null); }); }
-                }} style={{padding:"10px 14px",borderRadius:11,background:modal.paid?"#FFF8E1":"#E8F5E9",color:modal.paid?"#E8A838":"#27AE60",fontWeight:800,fontSize:13,textAlign:"left"}}>
-                  {modal.paid?"Marcar como pendiente":"Marcar como pagado"}
-                </button>
-              )}
             </div>
             <div style={{display:"flex",gap:10,marginTop:20}}>
               {modal.editId&&<button onClick={function(){
