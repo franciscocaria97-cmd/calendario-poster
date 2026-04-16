@@ -685,6 +685,8 @@ function ProveedoresCalendar() {
                             Ver factura
                           </button>
                         )}
+                        <button onClick={function(){ setForm({supplier:p.supplier,amount:String(p.amount),fileUrl:null,fileName:p.file_url?p.file_url.split("/").pop():""}); setModal({day:p.day,editId:p.id,paid:p.paid,fileUrl:p.file_url}); }}
+                          style={{width:32,height:32,borderRadius:8,background:"#F4F6FB",color:"#8892A4",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>&#9998;</button>
                       </div>
                     </div>
                   );
