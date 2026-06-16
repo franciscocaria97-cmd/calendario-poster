@@ -28,7 +28,7 @@
 const { useState, useEffect, useRef } = React;
 
 const SUPA_URL = "https://tzywtsxgfgmcglamyuar.supabase.co";
-const SUPA_KEY = "sb_publishable_3TZrHDWcuOhlmjyLPaaIgA_PuO7Opxd";
+const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR6eXd0c3hnZmdtY2dsYW15dWFyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzODQ5NzYsImV4cCI6MjA4OTk2MDk3Nn0.I05JPStdDozvGKgy7-guN0wGAUvR5y96eFF1Myq2F30";
 
 async function supa(path, opts) {
   if (!opts) opts = {};
@@ -134,7 +134,6 @@ function WelcomePopup(props) {
           db.get("prov_payments","month_key=eq."+mk+"&day=eq."+today+"&paid=eq.false"),
         ]);
         var afipRaw = afip;
-        // Consolidar moratorias en una sola línea
         var moratorias = afipRaw.filter(function(p){ return p.category==="Moratoria"||p.is_moratoria_plan; });
         var otros = afipRaw.filter(function(p){ return p.category!=="Moratoria"&&!p.is_moratoria_plan; });
         var consolidated = otros;
@@ -280,7 +279,7 @@ function NuevoProveedorModal(props) {
   );
 }
 
-// ── Password Confirm Modal (para eliminar pagos pagados) ──
+// ── Password Confirm Modal ──
 function PasswordConfirmModal(props) {
   var [pw,setPw]=useState(""), [err,setErr]=useState(false);
   function confirm() {
@@ -329,17 +328,14 @@ function AfipCalendar() {
         db.get("afip_recurring","order=day.asc"),
         db.get("moratoria_plans","order=plan.asc"),
       ]);
-      // Auto-populate recurring
       var existIds=pays.map(function(p){ return p.recur_id; }).filter(Boolean);
       var toAdd=recs.filter(function(r){ return !existIds.includes(r.id); });
       if(toAdd.length>0){
         var ins=await db.insert("afip_payments",toAdd.map(function(r){ return {month_key:mk,day:r.day,name:r.name,amount:r.amount,category:r.category,paid:false,recur_id:r.id}; }));
         if(Array.isArray(ins)) pays=pays.concat(ins);
       }
-      // Moratoria unificada — consolidar todos los planes en UNO
       var morTotal=plans.reduce(function(s,p){ return s+(p.amount||0); },0);
       var existMor=pays.filter(function(p){ return p.is_moratoria_plan; });
-      // Si hay más de 1 entrada de moratoria (planes viejos), eliminar duplicados y dejar solo una
       if(existMor.length>1){
         var toDelete=existMor.slice(1);
         for(var di=0;di<toDelete.length;di++){ try{ await db.delete("afip_payments","id=eq."+toDelete[di].id); }catch(e){} }
@@ -350,7 +346,6 @@ function AfipCalendar() {
         var insMor=await db.insert("afip_payments",{month_key:mk,day:16,name:"Moratoria",amount:morTotal,category:"Moratoria",paid:false,is_moratoria_plan:true});
         pays=pays.concat(Array.isArray(insMor)?insMor:[insMor]);
       } else if(existMor.length>0){
-        // Actualizar nombre y monto si cambió
         var needsUpdate=(existMor[0].name!=="Moratoria"||existMor[0].amount!==morTotal);
         if(needsUpdate){ await db.update("afip_payments","id=eq."+existMor[0].id,{name:"Moratoria",amount:morTotal}); }
         pays=pays.map(function(p){ return p.id===existMor[0].id?Object.assign({},p,{name:"Moratoria",amount:morTotal}):p; });
@@ -383,7 +378,6 @@ function AfipCalendar() {
 
   async function deletePay(id){ setSaving(true); await db.delete("afip_payments","id=eq."+id); cDel("afip:"+mk); await loadData(); setSaving(false); setModal(null); }
 
-  // Calendar grid
   var byDay={};
   payments.forEach(function(p){ if(!byDay[p.day]) byDay[p.day]=[]; byDay[p.day].push(p); });
   var totalDays=daysInMonth(year,month), startOff=firstDay(year,month), grid=[];
@@ -464,7 +458,6 @@ function AfipCalendar() {
         </div>
       )}
 
-      {/* Day detail modal */}
       {dayModal&&!modal&&(
         <div onClick={function(){ setDayModal(null); }} style={{position:"fixed",inset:0,background:"#00000055",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16,backdropFilter:"blur(4px)"}}>
           <div onClick={function(e){ e.stopPropagation(); }} className="fade-in" style={{background:"#fff",borderRadius:22,padding:26,width:"100%",maxWidth:420,boxShadow:"0 30px 80px #0003",maxHeight:"85vh",overflowY:"auto"}}>
@@ -496,7 +489,6 @@ function AfipCalendar() {
       )}
 
       {metodoPagoModal&&<MetodoPagoModal onClose={function(){ setMetodoPagoModal(null); }} onConfirm={async function(m){ await db.update("afip_payments","id=eq."+metodoPagoModal.id,{paid:true,metodo_pago:m}); cDel("afip:"+mk); await loadData(); setMetodoPagoModal(null); }}/>}
-
       {pwDeleteModal&&<PasswordConfirmModal onClose={function(){ setPwDeleteModal(null); }} onConfirm={function(){ deletePay(pwDeleteModal); setPwDeleteModal(null); setModal(null); }}/>}
 
       {modal&&(
@@ -622,7 +614,6 @@ function ProveedoresCalendar() {
     cSet("prov:"+mk,up); setPayments(up);
   }
 
-  // Calendar
   var byDay={};
   payments.forEach(function(p){ if(!byDay[p.day]) byDay[p.day]=[]; byDay[p.day].push(p); });
   var totalDays=daysInMonth(year,month), startOff=firstDay(year,month), grid=[];
@@ -639,7 +630,6 @@ function ProveedoresCalendar() {
         })}
       </div>
 
-      {/* Pagos del mes */}
       {subTab==="pagos"&&(
         <div>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fff",borderRadius:14,padding:"13px 20px",marginBottom:12,boxShadow:"0 1px 3px #0001"}}>
@@ -698,7 +688,6 @@ function ProveedoresCalendar() {
         </div>
       )}
 
-      {/* Calendario */}
       {subTab==="calendario"&&(<>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fff",borderRadius:14,padding:"13px 20px",marginBottom:12,boxShadow:"0 1px 3px #0001"}}>
           <button onClick={function(){ if(month===0){setMonth(11);setYear(function(y){return y-1;});}else setMonth(function(m){return m-1;}); }} style={{width:38,height:38,borderRadius:10,background:GREEN.light,color:GREEN.main,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800}}>&#8249;</button>
@@ -739,7 +728,6 @@ function ProveedoresCalendar() {
         )}
       </>)}
 
-      {/* Proveedores */}
       {subTab==="proveedores"&&(
         <div style={{background:"#fff",borderRadius:14,padding:22,boxShadow:"0 1px 3px #0001"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -770,15 +758,13 @@ function ProveedoresCalendar() {
       )}
 
       {comprobanteModal&&<ComprobanteModal onClose={function(){ setComprobanteModal(null); }} onConfirm={async function(url){ await db.update("prov_payments","id=eq."+comprobanteModal.id,{paid:true,comprobante_url:url}); var up=payments.map(function(p){ return p.id===comprobanteModal.id?Object.assign({},p,{paid:true,comprobante_url:url}):p; }); cSet("prov:"+mk,up); setPayments(up); setComprobanteModal(null); }}/>}
-
       {pwDeleteModal&&<PasswordConfirmModal onClose={function(){ setPwDeleteModal(null); }} onConfirm={function(){ deletePay(pwDeleteModal); setPwDeleteModal(null); setModal(null); }}/>}
-
       {modal&&modal.isNewSup&&<NuevoProveedorModal onClose={function(){ setModal(null); }} onSave={async function(data){ await db.insert("prov_suppliers",data); cDel("sups"); await loadData(); setModal(null); }}/>}
 
       {modal&&!modal.isNewSup&&(
         <div onClick={function(){ setModal(null); }} style={{position:"fixed",inset:0,background:"#00000055",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16,backdropFilter:"blur(4px)"}}>
           <div onClick={function(e){ e.stopPropagation(); }} className="fade-in" style={{background:"#fff",borderRadius:22,padding:28,width:"100%",maxWidth:400,boxShadow:"0 30px 80px #0003",maxHeight:"90vh",overflowY:"auto"}}>
-            <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:19,color:"#1A1D2E",marginBottom:18}}>{modal.editId?(modal.day+" de "+MONTHS[month]):(modal.day+" de "+MONTHS[month])}</h2>
+            <h2 style={{fontFamily:"'Fraunces',serif",fontWeight:800,fontSize:19,color:"#1A1D2E",marginBottom:18}}>{modal.day+" de "+MONTHS[month]}</h2>
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
               <div>
                 <label style={{fontSize:11,fontWeight:800,color:"#8892A4",display:"block",marginBottom:5,textTransform:"uppercase"}}>Proveedor</label>
@@ -819,7 +805,7 @@ function ProveedoresCalendar() {
   );
 }
 
-// ── Registro de Pagos (con contrasena) ──
+// ── Registro de Pagos ──
 function RegistroPagos() {
   var [unlocked,setUnlocked]=useState(false), [pw,setPw]=useState(""), [pwErr,setPwErr]=useState(false);
   var [tab,setTab]=useState("prov"), [data,setData]=useState([]), [loading,setLoading]=useState(false);
